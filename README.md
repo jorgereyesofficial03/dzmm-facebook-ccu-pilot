@@ -4,7 +4,7 @@ Browser-based Facebook **current concurrent viewer (CCU)** monitoring for the ra
 
 ## Version
 
-**v1.4.0-alpha.1 — Multi-channel test build**
+**v1.4.0-alpha.2 — Multi-channel test build**
 
 YouTube automation remains separate.
 
@@ -50,6 +50,17 @@ It launches six `manual_test` workflows. Manual tests write diagnostics to LOG b
 ## Authentication rule
 
 The worker may close a removable **"See more on Facebook"** overlay if public content remains accessible. It does not bypass a genuine login requirement.
+
+## Multi-channel test checkpoint — 2026-09-28
+
+Passed current-live detection + viewer extraction:
+- DZMM TeleRadyo
+- DZBB Super Radyo
+- DZRH
+- DWWW
+- DZRV / Veritas PH
+
+DWXI initially selected an old video because Facebook's navigation word "Live" was too broad a discovery signal. v1.4.0-alpha.2 tightens discovery to require either "is live now" or a "LIVE:" title/context before a /videos/ link is accepted.
 
 ## Diagnostics
 
