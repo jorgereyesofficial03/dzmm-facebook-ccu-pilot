@@ -1,24 +1,42 @@
 /**
- * GitHub Actions dispatcher — v1.3.0-alpha.2
+ * DZMM Facebook GitHub dispatcher — v1.3.0-alpha.5
+ * Timezone: Asia/Manila
  *
- * Script Properties required:
+ * Keeps YouTube v1.2.0 separate.
+ *
+ * Script Property required:
  * GITHUB_ACTIONS_TOKEN
  *
- * Fine-grained token:
+ * Fine-grained GitHub token:
  * Repository: jorgereyesofficial03/dzmm-facebook-ccu-pilot
  * Repository permission: Actions = Read and write
  */
 
+const FB_DZMM = {
+  TZ: 'Asia/Manila',
+  START_HOUR: 5,
+  END_HOUR: 12,
+  START_MINUTE: 1,
+  END_MINUTE: 15,
+  MAIN_SHEET: 'LIVE STREAM',
+  LOG_SHEET: 'LOG',
+  DZMM_ROW: 6,
+  REPO: 'jorgereyesofficial03/dzmm-facebook-ccu-pilot',
+  WORKFLOW: 'dzmm-facebook-ccu.yml',
+  VERSION: 'v1.3.0-alpha.5'
+};
+
 function dispatchDzmmFacebookWorkflow_(slotHour) {
-  const token = PropertiesService.getScriptProperties().getProperty('GITHUB_ACTIONS_TOKEN') || '';
+  const token =
+    PropertiesService.getScriptProperties().getProperty('GITHUB_ACTIONS_TOKEN') || '';
 
   if (!token) {
     throw new Error('Missing GITHUB_ACTIONS_TOKEN Script Property.');
   }
 
   const url =
-    'https://api.github.com/repos/jorgereyesofficial03/dzmm-facebook-ccu-pilot/' +
-    'actions/workflows/dzmm-facebook-ccu.yml/dispatches';
+    'https://api.github.com/repos/' + FB_DZMM.REPO +
+    '/actions/workflows/' + FB_DZMM.WORKFLOW + '/dispatches';
 
   const response = UrlFetchApp.fetch(url, {
     method: 'post',
@@ -31,8 +49,9 @@ function dispatchDzmmFacebookWorkflow_(slotHour) {
     payload: JSON.stringify({
       ref: 'main',
       inputs: {
+        mode: 'scheduled_window',
         slot_hour: String(slotHour),
-        retry_end_minute: '15'
+        retry_end_minute: String(FB_DZMM.END_MINUTE)
       }
     }),
     muteHttpExceptions: true
@@ -47,23 +66,151 @@ function dispatchDzmmFacebookWorkflow_(slotHour) {
   }
 }
 
-/**
- * Manual test helper.
- * Use only while the current PHT hour is one of 5..12.
- */
-function testDispatchDzmmFacebookNow() {
-  const hour = Number(Utilities.formatDate(new Date(), 'Asia/Manila', 'H'));
+function facebookDzmmDispatchScheduler() {
+  const now = new Date();
+  const hour = Number(Utilities.formatDate(now, FB_DZMM.TZ, 'H'));
+  const minute = Number(Utilities.formatDate(now, FB_DZMM.TZ, 'm'));
 
-  if (hour < 5 || hour > 12) {
+  if (hour < FB_DZMM.START_HOUR || hour > FB_DZMM.END_HOUR) return;
+  if (minute < FB_DZMM.START_MINUTE || minute > FB_DZMM.END_MINUTE) return;
+
+  const dateKey = Utilities.formatDate(now, FB_DZMM.TZ, 'yyyy-MM-dd');
+  cleanupOldFacebookDispatchFlags_(dateKey);
+
+  const props = PropertiesService.getScriptProperties();
+  const dispatchKey =
+    'FB_DZMM_DISPATCH_' + dateKey + '_' + String(hour).padStart(2, '0');
+
+  if (props.getProperty(dispatchKey) === '1') return;
+
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FB_DZMM.MAIN_SHEET);
+  if (!sh) throw new Error('Missing sheet: ' + FB_DZMM.MAIN_SHEET);
+
+  // Facebook columns: C,E,G,I,K,M,O,Q for 5AM..12PM.
+  const fbCol = 3 + ((hour - FB_DZMM.START_HOUR) * 2);
+  const target = sh.getRange(FB_DZMM.DZMM_ROW, fbCol);
+
+  // If this hour already has a Facebook CCU, lock the dispatch flag and do nothing.
+  if (target.getValue() !== '') {
+    props.setProperty(dispatchKey, '1');
+    return;
+  }
+
+  try {
+    dispatchDzmmFacebookWorkflow_(hour);
+    props.setProperty(dispatchKey, '1');
+
+    appendFacebookDispatchLog_(
+      now,
+      hour,
+      dateKey,
+      'DISPATCHED',
+      'GitHub scheduled_window started automatically.'
+    );
+  } catch (err) {
+    // Do not set the dispatch flag on failure.
+    // The every-minute trigger can retry within +01..+15.
+    appendFacebookDispatchLog_(
+      now,
+      hour,
+      dateKey,
+      'DISPATCH_ERROR',
+      err && err.message ? err.message : String(err)
+    );
+    throw err;
+  }
+}
+
+function setupFacebookDzmmAutomation() {
+  removeFacebookDzmmAutomation();
+
+  ScriptApp.newTrigger('facebookDzmmDispatchScheduler')
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    'DZMM Facebook automation installed — first dispatch from +01 through +15, ' +
+    'then GitHub retries until first valid CCU or +15.',
+    'Facebook CCU ' + FB_DZMM.VERSION,
+    10
+  );
+}
+
+function removeFacebookDzmmAutomation() {
+  ScriptApp.getProjectTriggers().forEach(trigger => {
+    if (trigger.getHandlerFunction() === 'facebookDzmmDispatchScheduler') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+}
+
+function testFacebookDzmmDispatchNow() {
+  const now = new Date();
+  const hour = Number(Utilities.formatDate(now, FB_DZMM.TZ, 'H'));
+
+  if (hour < FB_DZMM.START_HOUR || hour > FB_DZMM.END_HOUR) {
     throw new Error('Current PHT hour is outside 5:00 AM–12:00 PM.');
   }
 
   dispatchDzmmFacebookWorkflow_(hour);
 
   SpreadsheetApp.getActiveSpreadsheet().toast(
-    'DZMM Facebook GitHub Action dispatched for ' +
-    (hour === 12 ? '12:00 PM' : hour + ':00 AM') + '.',
-    'Facebook CCU Pilot',
+    'Scheduled-window GitHub workflow dispatched for ' +
+    formatFacebookSlot_(hour) + '.',
+    'Facebook CCU Test',
     10
   );
+}
+
+function resetFacebookDzmmDispatchThisHour() {
+  const now = new Date();
+  const hour = Number(Utilities.formatDate(now, FB_DZMM.TZ, 'H'));
+  const dateKey = Utilities.formatDate(now, FB_DZMM.TZ, 'yyyy-MM-dd');
+
+  PropertiesService.getScriptProperties().deleteProperty(
+    'FB_DZMM_DISPATCH_' + dateKey + '_' + String(hour).padStart(2, '0')
+  );
+
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    'Facebook dispatch flag reopened for ' + formatFacebookSlot_(hour) + '.',
+    'Facebook CCU',
+    8
+  );
+}
+
+function cleanupOldFacebookDispatchFlags_(dateKey) {
+  const props = PropertiesService.getScriptProperties();
+  const all = props.getProperties();
+
+  Object.keys(all).forEach(key => {
+    if (
+      key.indexOf('FB_DZMM_DISPATCH_') === 0 &&
+      key.indexOf('FB_DZMM_DISPATCH_' + dateKey + '_') !== 0
+    ) {
+      props.deleteProperty(key);
+    }
+  });
+}
+
+function appendFacebookDispatchLog_(now, hour, dateKey, status, notes) {
+  const log = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FB_DZMM.LOG_SHEET);
+  if (!log) return;
+
+  log.appendRow([
+    Utilities.formatDate(now, FB_DZMM.TZ, 'yyyy-MM-dd HH:mm:ss'),
+    formatFacebookSlot_(hour),
+    dateKey,
+    'DZMM TeleRadyo',
+    'Facebook',
+    '',
+    '',
+    '',
+    status,
+    notes
+  ]);
+}
+
+function formatFacebookSlot_(hour) {
+  return hour === 12 ? '12:00 PM' : hour + ':00 AM';
 }
