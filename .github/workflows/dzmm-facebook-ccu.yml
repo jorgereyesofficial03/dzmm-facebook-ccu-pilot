@@ -44,6 +44,19 @@ jobs:
       APPS_SCRIPT_CALLBACK_SECRET: ${{ secrets.APPS_SCRIPT_CALLBACK_SECRET }}
 
     steps:
+      - name: Validate callback configuration
+        shell: bash
+        run: |
+          if [ -z "$APPS_SCRIPT_CALLBACK_URL" ]; then
+            echo "::error::Missing APPS_SCRIPT_CALLBACK_URL repository secret."
+            exit 1
+          fi
+          if [ -z "$APPS_SCRIPT_CALLBACK_SECRET" ]; then
+            echo "::error::Missing APPS_SCRIPT_CALLBACK_SECRET repository secret."
+            exit 1
+          fi
+          echo "Apps Script callback secrets are configured."
+
       - name: Check out repository
         uses: actions/checkout@v4
 
