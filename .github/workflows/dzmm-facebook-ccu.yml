@@ -1,0 +1,62 @@
+name: DZMM Facebook CCU Pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      slot_hour:
+        description: "Scheduled PHT hour, 5 through 12"
+        required: true
+        default: "5"
+        type: string
+      retry_end_minute:
+        description: "Stop retrying after this minute"
+        required: true
+        default: "15"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dzmm-facebook-ccu-${{ github.event.inputs.slot_hour }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      TZ: Asia/Manila
+      SLOT_HOUR: ${{ github.event.inputs.slot_hour }}
+      RETRY_END_MINUTE: ${{ github.event.inputs.retry_end_minute }}
+      FB_PAGE_URL: https://www.facebook.com/DZMMTeleradyo.MSPC/
+      APPS_SCRIPT_CALLBACK_URL: ${{ secrets.APPS_SCRIPT_CALLBACK_URL }}
+      APPS_SCRIPT_CALLBACK_SECRET: ${{ secrets.APPS_SCRIPT_CALLBACK_SECRET }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Facebook CCU probe
+        run: npm run probe
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dzmm-facebook-ccu-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
