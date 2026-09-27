@@ -40,7 +40,7 @@ const CALLBACK_URL = process.env.APPS_SCRIPT_CALLBACK_URL || '';
 const CALLBACK_SECRET = process.env.APPS_SCRIPT_CALLBACK_SECRET || '';
 
 const runMode = process.env.RUN_MODE || 'scheduled_window';
-const slotHour = Number(process.env.SLOT_HOUR || 5);
+const requestedSlotHour = Number(process.env.SLOT_HOUR);
 const retryEndMinute = Number(process.env.RETRY_END_MINUTE || 15);
 const timeZone = 'Asia/Manila';
 
@@ -122,8 +122,17 @@ async function isHardLoginGate(page) {
   const videoLinkCount = await page.locator('a[href*="/videos/"]').count().catch(() => 0);
   const txt = (await pageText(page)).toLowerCase();
 
+  // A login banner/modal alone is NOT a hard gate when Facebook still renders
+  // meaningful public Page content underneath (page name, posts/videos, etc.).
+  const pageShellVisible =
+    txt.includes(String(station.channel || '').toLowerCase()) ||
+    /\bposts\b/.test(txt) ||
+    /\bvideos\b/.test(txt) ||
+    /followers/.test(txt);
+
   return (
     passwordCount > 0 &&
+    !pageShellVisible &&
     publicVideoCount === 0 &&
     videoLinkCount === 0 &&
     /log in|login|see more on facebook/.test(txt)
@@ -396,13 +405,30 @@ async function oneAttempt(browser, attemptNo) {
   }
 }
 
+function resolvedSlotHour_(pht) {
+  if (Number.isInteger(requestedSlotHour) &&
+      requestedSlotHour >= 5 &&
+      requestedSlotHour <= 12) {
+    return requestedSlotHour;
+  }
+
+  if (runMode === 'manual_test' &&
+      Number.isInteger(pht.hour) &&
+      pht.hour >= 5 &&
+      pht.hour <= 12) {
+    return pht.hour;
+  }
+
+  return requestedSlotHour;
+}
+
 function basePayload(pht, result, testMode) {
   return {
     stationKey,
     channel: station.channel,
     platform: 'Facebook',
     date: pht.date,
-    slotHour,
+    slotHour: resolvedSlotHour_(pht),
     testMode,
     pageUrl: PAGE_URL,
     observedAtPht: pht,
@@ -443,7 +469,7 @@ async function main() {
     while (true) {
       const pht = nowPhtParts();
 
-      if (pht.hour !== slotHour || pht.minute > retryEndMinute) {
+      if (pht.hour !== resolvedSlotHour_(pht) || pht.minute > retryEndMinute) {
         const finalPayload = basePayload(pht, {
           ...last,
           ok: false,
