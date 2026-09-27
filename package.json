@@ -1,0 +1,12 @@
+{
+  "name": "dzmm-facebook-ccu-pilot",
+  "version": "1.3.0-alpha.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "probe": "node src/facebook-probe.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}
