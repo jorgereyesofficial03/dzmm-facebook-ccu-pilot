@@ -45,21 +45,40 @@ function parseCount(raw) {
 }
 
 async function dismissPublicOverlay(page) {
+  await page.keyboard.press('Escape').catch(() => {});
+
   const closeSelectors = [
     'button[aria-label="Close"]',
     '[role="button"][aria-label="Close"]',
-    'div[aria-label="Close"][role="button"]'
+    'div[aria-label="Close"][role="button"]',
+    '[role="dialog"] [aria-label="Close"]'
   ];
 
   for (const selector of closeSelectors) {
     const loc = page.locator(selector);
     const count = await loc.count().catch(() => 0);
-    for (let i = 0; i < Math.min(count, 5); i++) {
+    for (let i = 0; i < Math.min(count, 8); i++) {
       const el = loc.nth(i);
       if (await el.isVisible().catch(() => false)) {
         await el.click({ timeout: 2000 }).catch(() => {});
-        await page.waitForTimeout(400);
+        await page.waitForTimeout(350);
       }
+    }
+  }
+
+  // Facebook sometimes renders the public-content prompt with an unlabeled X.
+  // If the visible dialog contains "See more on Facebook", click near its top-right corner.
+  const dialogs = page.locator('[role="dialog"]');
+  const dcount = await dialogs.count().catch(() => 0);
+  for (let i = 0; i < Math.min(dcount, 5); i++) {
+    const dialog = dialogs.nth(i);
+    if (!(await dialog.isVisible().catch(() => false))) continue;
+    const txt = (await dialog.innerText().catch(() => '')).toLowerCase();
+    if (!txt.includes('see more on facebook')) continue;
+    const box = await dialog.boundingBox().catch(() => null);
+    if (box) {
+      await page.mouse.click(box.x + box.width - 30, box.y + 30).catch(() => {});
+      await page.waitForTimeout(500);
     }
   }
 }
@@ -260,17 +279,37 @@ async function oneAttempt(browser, attemptNo) {
   page.setDefaultTimeout(7000);
 
   try {
-    await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(2500);
-    await dismissPublicOverlay(page);
+    const base = PAGE_URL.replace(/\/+$/, '');
+    const routes = [
+      PAGE_URL,
+      base + '/live',
+      base + '/videos'
+    ];
 
-    if (await isHardLoginGate(page)) {
-      return { ok: false, status: 'FB_LOGIN_REQUIRED', attemptNo };
+    let liveUrl = null;
+    let sawLoginGate = false;
+    const visited = [];
+
+    for (const route of routes) {
+      await page.goto(route, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await page.waitForTimeout(2500);
+      await dismissPublicOverlay(page);
+      visited.push(page.url());
+
+      liveUrl = await findLiveUrl(page);
+      if (liveUrl) break;
+
+      if (await isHardLoginGate(page)) sawLoginGate = true;
     }
 
-    const liveUrl = await findLiveUrl(page);
     if (!liveUrl) {
-      return { ok: false, status: 'FB_NO_LIVE', attemptNo };
+      await page.screenshot({ path: 'artifacts/last-attempt.png', fullPage: true }).catch(() => {});
+      return {
+        ok: false,
+        status: sawLoginGate ? 'FB_LOGIN_REQUIRED' : 'FB_NO_LIVE',
+        attemptNo,
+        visited
+      };
     }
 
     if (normalizeFbUrl(page.url()) !== liveUrl) {
@@ -279,32 +318,42 @@ async function oneAttempt(browser, attemptNo) {
       await dismissPublicOverlay(page);
     }
 
-    if (await isHardLoginGate(page)) {
-      return { ok: false, status: 'FB_LOGIN_REQUIRED', liveUrl, attemptNo };
-    }
-
-    const viewer = await extractViewerCount(page);
     const title = await extractTitle(page);
+    const viewer = await extractViewerCount(page);
 
-    if (!viewer) {
-      await page.screenshot({ path: 'artifacts/last-attempt.png', fullPage: true }).catch(() => {});
+    if (viewer) {
       return {
-        ok: false,
-        status: 'FB_VIEWER_UNAVAILABLE',
+        ok: true,
+        status: 'OK',
+        viewerCount: viewer.value,
+        extractionMethod: viewer.method,
         liveUrl,
         title,
-        attemptNo
+        attemptNo,
+        visited
+      };
+    }
+
+    await page.screenshot({ path: 'artifacts/last-attempt.png', fullPage: true }).catch(() => {});
+
+    if (await isHardLoginGate(page)) {
+      return {
+        ok: false,
+        status: 'FB_LOGIN_REQUIRED',
+        liveUrl,
+        title,
+        attemptNo,
+        visited
       };
     }
 
     return {
-      ok: true,
-      status: 'OK',
-      viewerCount: viewer.value,
-      extractionMethod: viewer.method,
+      ok: false,
+      status: 'FB_VIEWER_UNAVAILABLE',
       liveUrl,
       title,
-      attemptNo
+      attemptNo,
+      visited
     };
   } finally {
     await context.close().catch(() => {});
