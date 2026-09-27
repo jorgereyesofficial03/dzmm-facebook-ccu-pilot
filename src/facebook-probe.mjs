@@ -8,6 +8,7 @@ const PAGE_URL =
 const CALLBACK_URL = process.env.APPS_SCRIPT_CALLBACK_URL || '';
 const CALLBACK_SECRET = process.env.APPS_SCRIPT_CALLBACK_SECRET || '';
 
+const runMode = process.env.RUN_MODE || 'scheduled_window';
 const slotHour = Number(process.env.SLOT_HOUR || 5);
 const retryEndMinute = Number(process.env.RETRY_END_MINUTE || 15);
 const timeZone = 'Asia/Manila';
@@ -318,6 +319,36 @@ async function main() {
   let last = { ok: false, status: 'FB_ERROR', error: 'No attempts executed' };
 
   try {
+    if (runMode === 'manual_test') {
+      const pht = nowPhtParts();
+
+      try {
+        last = await oneAttempt(browser, 1);
+      } catch (err) {
+        last = {
+          ok: false,
+          status: 'FB_ERROR',
+          error: err?.message || String(err),
+          attemptNo: 1
+        };
+      }
+
+      const payload = {
+        channel: 'DZMM TeleRadyo',
+        platform: 'Facebook',
+        date: pht.date,
+        slotHour,
+        testMode: true,
+        observedAtPht: pht,
+        ...last
+      };
+
+      console.log(JSON.stringify(payload, null, 2));
+      await writeResult(payload);
+      await callback(payload);
+      return;
+    }
+
     let attemptNo = 0;
 
     while (true) {
