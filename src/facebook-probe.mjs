@@ -1,10 +1,41 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs/promises';
 
-const PAGE_URL =
-  process.env.FB_PAGE_URL ||
-  'https://www.facebook.com/DZMMTeleradyo.MSPC/';
+const STATIONS = {
+  dzmm: {
+    channel: 'DZMM TeleRadyo',
+    pageUrl: 'https://www.facebook.com/DZMMTeleradyo.MSPC/'
+  },
+  dzbb: {
+    channel: 'DZBB Super Radyo',
+    pageUrl: 'https://www.facebook.com/dzbb594/'
+  },
+  dzrh: {
+    channel: 'DZRH',
+    pageUrl: 'https://www.facebook.com/dzrhnews/'
+  },
+  dwww: {
+    channel: 'DWWW',
+    pageUrl: 'https://www.facebook.com/DWWW774/'
+  },
+  dwxi: {
+    channel: 'DWXI',
+    pageUrl: 'https://www.facebook.com/dwxi1314khz/'
+  },
+  dzrv: {
+    channel: 'DZRV / Veritas PH',
+    pageUrl: 'https://www.facebook.com/DZRV846/'
+  }
+};
 
+const stationKey = String(process.env.STATION_KEY || 'dzmm').toLowerCase();
+const station = STATIONS[stationKey];
+
+if (!station) {
+  throw new Error('Unknown STATION_KEY: ' + stationKey);
+}
+
+const PAGE_URL = station.pageUrl;
 const CALLBACK_URL = process.env.APPS_SCRIPT_CALLBACK_URL || '';
 const CALLBACK_SECRET = process.env.APPS_SCRIPT_CALLBACK_SECRET || '';
 
@@ -66,8 +97,6 @@ async function dismissPublicOverlay(page) {
     }
   }
 
-  // Facebook sometimes renders the public-content prompt with an unlabeled X.
-  // If the visible dialog contains "See more on Facebook", click near its top-right corner.
   const dialogs = page.locator('[role="dialog"]');
   const dcount = await dialogs.count().catch(() => 0);
   for (let i = 0; i < Math.min(dcount, 5); i++) {
@@ -118,7 +147,7 @@ async function findLiveUrl(page) {
   const links = page.locator('a[href*="/videos/"]');
   const count = await links.count().catch(() => 0);
 
-  for (let i = 0; i < Math.min(count, 80); i++) {
+  for (let i = 0; i < Math.min(count, 100); i++) {
     const link = links.nth(i);
     if (!(await link.isVisible().catch(() => false))) continue;
 
@@ -127,9 +156,9 @@ async function findLiveUrl(page) {
 
     const context = await link.evaluate((el) => {
       let n = el;
-      for (let d = 0; d < 8 && n; d++, n = n.parentElement) {
+      for (let d = 0; d < 9 && n; d++, n = n.parentElement) {
         const t = (n.innerText || n.textContent || '').trim();
-        if (/is live now|(^|\s)LIVE[:\s]/i.test(t)) return t.slice(0, 2500);
+        if (/is live now|(^|\s)LIVE[:\s]/i.test(t)) return t.slice(0, 3000);
       }
       return '';
     }).catch(() => '');
@@ -149,7 +178,7 @@ async function extractViewerCount(page) {
       text: (el.innerText || el.textContent || '').trim()
     }))
     .filter(x => /viewer|watching/i.test(x.label))
-    .slice(0, 120)
+    .slice(0, 150)
   ).catch(() => []);
 
   for (const hit of aria) {
@@ -209,9 +238,9 @@ async function extractViewerCount(page) {
           context += ' ' + ((n.innerText || n.textContent || '').trim());
         }
 
-        out.push({ text, context: context.slice(0, 600) });
+        out.push({ text, context: context.slice(0, 700) });
       }
-      return out.slice(0, 80);
+      return out.slice(0, 100);
     }, vbox).catch(() => []);
 
     const ordered = [
@@ -242,13 +271,13 @@ async function extractTitle(page) {
 }
 
 async function callback(payload) {
-  if (!CALLBACK_URL || !CALLBACK_SECRET) return;
+  if (!CALLBACK_URL || !CALLBACK_SECRET) {
+    throw new Error('Callback configuration missing.');
+  }
 
   const r = await fetch(CALLBACK_URL, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json'
-    },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       secret: CALLBACK_SECRET,
       ...payload
@@ -262,7 +291,18 @@ async function callback(payload) {
 
 async function writeResult(result) {
   await fs.mkdir('artifacts', { recursive: true });
-  await fs.writeFile('artifacts/result.json', JSON.stringify(result, null, 2));
+  await fs.writeFile(
+    `artifacts/result-${stationKey}.json`,
+    JSON.stringify(result, null, 2)
+  );
+}
+
+async function screenshot(page) {
+  await fs.mkdir('artifacts', { recursive: true });
+  await page.screenshot({
+    path: `artifacts/last-attempt-${stationKey}.png`,
+    fullPage: true
+  }).catch(() => {});
 }
 
 async function oneAttempt(browser, attemptNo) {
@@ -280,11 +320,7 @@ async function oneAttempt(browser, attemptNo) {
 
   try {
     const base = PAGE_URL.replace(/\/+$/, '');
-    const routes = [
-      PAGE_URL,
-      base + '/live',
-      base + '/videos'
-    ];
+    const routes = [PAGE_URL, base + '/live', base + '/videos'];
 
     let liveUrl = null;
     let sawLoginGate = false;
@@ -303,7 +339,7 @@ async function oneAttempt(browser, attemptNo) {
     }
 
     if (!liveUrl) {
-      await page.screenshot({ path: 'artifacts/last-attempt.png', fullPage: true }).catch(() => {});
+      await screenshot(page);
       return {
         ok: false,
         status: sawLoginGate ? 'FB_LOGIN_REQUIRED' : 'FB_NO_LIVE',
@@ -334,7 +370,7 @@ async function oneAttempt(browser, attemptNo) {
       };
     }
 
-    await page.screenshot({ path: 'artifacts/last-attempt.png', fullPage: true }).catch(() => {});
+    await screenshot(page);
 
     if (await isHardLoginGate(page)) {
       return {
@@ -360,21 +396,33 @@ async function oneAttempt(browser, attemptNo) {
   }
 }
 
+function basePayload(pht, result, testMode) {
+  return {
+    stationKey,
+    channel: station.channel,
+    platform: 'Facebook',
+    date: pht.date,
+    slotHour,
+    testMode,
+    pageUrl: PAGE_URL,
+    observedAtPht: pht,
+    ...result
+  };
+}
+
 async function main() {
   await fs.mkdir('artifacts', { recursive: true });
-
   const browser = await chromium.launch({ headless: true });
-
-  let last = { ok: false, status: 'FB_ERROR', error: 'No attempts executed' };
 
   try {
     if (runMode === 'manual_test') {
       const pht = nowPhtParts();
+      let result;
 
       try {
-        last = await oneAttempt(browser, 1);
+        result = await oneAttempt(browser, 1);
       } catch (err) {
-        last = {
+        result = {
           ok: false,
           status: 'FB_ERROR',
           error: err?.message || String(err),
@@ -382,16 +430,7 @@ async function main() {
         };
       }
 
-      const payload = {
-        channel: 'DZMM TeleRadyo',
-        platform: 'Facebook',
-        date: pht.date,
-        slotHour,
-        testMode: true,
-        observedAtPht: pht,
-        ...last
-      };
-
+      const payload = basePayload(pht, result, true);
       console.log(JSON.stringify(payload, null, 2));
       await writeResult(payload);
       await callback(payload);
@@ -399,23 +438,29 @@ async function main() {
     }
 
     let attemptNo = 0;
+    let last = { ok: false, status: 'FB_ERROR', error: 'No attempts executed' };
 
     while (true) {
       const pht = nowPhtParts();
 
       if (pht.hour !== slotHour || pht.minute > retryEndMinute) {
-        last = {
+        const finalPayload = basePayload(pht, {
           ...last,
           ok: false,
           status: 'FB_TIMEOUT',
-          slotHour,
-          observedAtPht: pht
-        };
-        break;
+          lastStatus: last.status
+        }, false);
+
+        console.log(JSON.stringify(finalPayload, null, 2));
+        await writeResult(finalPayload);
+        await callback(finalPayload);
+        return;
       }
 
       attemptNo += 1;
-      console.log(`Attempt ${attemptNo} at PHT ${pht.hour}:${String(pht.minute).padStart(2, '0')}`);
+      console.log(
+        `${station.channel}: attempt ${attemptNo} at PHT ${pht.hour}:${String(pht.minute).padStart(2, '0')}`
+      );
 
       try {
         last = await oneAttempt(browser, attemptNo);
@@ -428,14 +473,7 @@ async function main() {
         };
       }
 
-      const payload = {
-        channel: 'DZMM TeleRadyo',
-        platform: 'Facebook',
-        date: pht.date,
-        slotHour,
-        ...last
-      };
-
+      const payload = basePayload(pht, last, false);
       console.log(JSON.stringify(payload, null, 2));
 
       if (last.ok) {
@@ -445,12 +483,13 @@ async function main() {
       }
 
       if (pht.minute >= retryEndMinute) {
-        const finalPayload = {
-          ...payload,
+        const finalPayload = basePayload(pht, {
+          ...last,
           ok: false,
           status: 'FB_TIMEOUT',
           lastStatus: last.status
-        };
+        }, false);
+
         await writeResult(finalPayload);
         await callback(finalPayload);
         return;
@@ -458,9 +497,6 @@ async function main() {
 
       await new Promise(resolve => setTimeout(resolve, 60000));
     }
-
-    await writeResult(last);
-    await callback(last);
   } finally {
     await browser.close().catch(() => {});
   }
@@ -468,6 +504,8 @@ async function main() {
 
 main().catch(async (err) => {
   const result = {
+    stationKey,
+    channel: station.channel,
     ok: false,
     status: 'FB_ERROR',
     error: err?.stack || err?.message || String(err)
