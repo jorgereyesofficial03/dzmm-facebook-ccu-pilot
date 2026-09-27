@@ -5,7 +5,7 @@ Browser-based Facebook **current concurrent viewer (CCU)** monitoring for the DZ
 ## Release state
 
 - **YouTube v1.2.0** — tested separately in Google Apps Script with `runTestAllNow`.
-- **Facebook v1.3.0-alpha.2** — DZMM-only pilot using GitHub Actions + Playwright. No Google Cloud billing required.
+- **Facebook v1.3.0-alpha.3** — DZMM-only pilot using GitHub Actions + Playwright. No Google Cloud billing required. Manual test mode can probe immediately without waiting for an hourly window.
 - Facebook does **not** modify the working YouTube automation until the pilot passes.
 
 ## Target
@@ -15,6 +15,10 @@ Facebook Page:
 `https://www.facebook.com/DZMMTeleradyo.MSPC/`
 
 The worker looks for the **current LIVE video** and reads the visible current-viewer number beside the LIVE / eye indicator.
+
+## Manual test mode
+
+Run the workflow with mode `manual_test` to make one immediate browser probe. This is for validation only.
 
 ## Hourly rule
 
@@ -64,6 +68,11 @@ The callback URL and secret are **not** committed to this public repository.
 Workflow runs also upload a diagnostic screenshot and JSON result as an artifact when available.
 
 ## Version history
+
+### v1.3.0-alpha.3 — 2026-09-28
+- Added immediate manual test mode.
+- Scheduled +01 to +15 behavior remains unchanged.
+
 
 ### v1.3.0-alpha.2 — 2026-09-28
 - Switched Facebook pilot from Cloud Run to no-billing GitHub Actions.
