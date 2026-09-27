@@ -1,6 +1,6 @@
 {
   "name": "dzmm-facebook-ccu-pilot",
-  "version": "1.3.0-alpha.3",
+  "version": "1.3.0-alpha.4",
   "private": true,
   "type": "module",
   "scripts": {
