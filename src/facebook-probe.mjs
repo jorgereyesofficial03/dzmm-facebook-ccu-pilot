@@ -158,12 +158,12 @@ async function findLiveUrl(page) {
       let n = el;
       for (let d = 0; d < 9 && n; d++, n = n.parentElement) {
         const t = (n.innerText || n.textContent || '').trim();
-        if (/is live now|(^|\s)LIVE[:\s]/i.test(t)) return t.slice(0, 3000);
+        if (/is live now|\bLIVE\s*:/i.test(t)) return t.slice(0, 3000);
       }
       return '';
     }).catch(() => '');
 
-    if (/is live now|(^|\s)LIVE[:\s]/i.test(context)) {
+    if (/is live now|\bLIVE\s*:/i.test(context)) {
       return normalizeFbUrl(href);
     }
   }
