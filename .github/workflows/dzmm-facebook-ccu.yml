@@ -1,8 +1,20 @@
-name: DZMM Facebook CCU Pilot
+name: Facebook CCU Multi-Channel
 
 on:
   workflow_dispatch:
     inputs:
+      station_key:
+        description: "Facebook station"
+        required: true
+        default: "dzmm"
+        type: choice
+        options:
+          - dzmm
+          - dzbb
+          - dzrh
+          - dwww
+          - dwxi
+          - dzrv
       mode:
         description: "Run mode"
         required: true
@@ -14,7 +26,7 @@ on:
       slot_hour:
         description: "Scheduled PHT hour, 5 through 12"
         required: true
-        default: "6"
+        default: "7"
         type: string
       retry_end_minute:
         description: "Scheduled mode only: stop retrying after this minute"
@@ -26,7 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: dzmm-facebook-ccu-${{ github.event.inputs.mode }}-${{ github.event.inputs.slot_hour }}
+  group: facebook-ccu-${{ github.event.inputs.station_key }}-${{ github.event.inputs.mode }}-${{ github.event.inputs.slot_hour }}
   cancel-in-progress: false
 
 jobs:
@@ -36,10 +48,10 @@ jobs:
 
     env:
       TZ: Asia/Manila
+      STATION_KEY: ${{ github.event.inputs.station_key }}
       RUN_MODE: ${{ github.event.inputs.mode }}
       SLOT_HOUR: ${{ github.event.inputs.slot_hour }}
       RETRY_END_MINUTE: ${{ github.event.inputs.retry_end_minute }}
-      FB_PAGE_URL: https://www.facebook.com/DZMMTeleradyo.MSPC/
       APPS_SCRIPT_CALLBACK_URL: ${{ secrets.APPS_SCRIPT_CALLBACK_URL }}
       APPS_SCRIPT_CALLBACK_SECRET: ${{ secrets.APPS_SCRIPT_CALLBACK_SECRET }}
 
@@ -78,7 +90,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dzmm-facebook-ccu-${{ github.run_id }}
+          name: facebook-ccu-${{ github.event.inputs.station_key }}-${{ github.run_id }}
           path: artifacts/
           if-no-files-found: ignore
           retention-days: 7
