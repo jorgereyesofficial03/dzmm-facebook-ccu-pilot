@@ -4,7 +4,7 @@ Browser-based Facebook **current concurrent viewer (CCU)** monitoring for the ra
 
 ## Version
 
-**v1.4.0-alpha.2 — Multi-channel test build**
+**v1.4.0-alpha.3 — Multi-channel test build**
 
 YouTube automation remains separate.
 
@@ -60,7 +60,7 @@ Passed current-live detection + viewer extraction:
 - DWWW
 - DZRV / Veritas PH
 
-DWXI initially selected an old video because Facebook's navigation word "Live" was too broad a discovery signal. v1.4.0-alpha.2 tightens discovery to require either "is live now" or a "LIVE:" title/context before a /videos/ link is accepted.
+DWXI initially selected an old video because Facebook's navigation word "Live" was too broad a discovery signal. v1.4.0-alpha.2 tightened discovery. v1.4.0-alpha.3 also treats a visible login banner/modal as non-blocking when public Page content is still rendered, so a public Page with no current live correctly returns FB_NO_LIVE instead of FB_LOGIN_REQUIRED. Manual tests also fall back to the current PHT hour if slot_hour is omitted.
 
 ## Diagnostics
 
