@@ -3,13 +3,21 @@ name: DZMM Facebook CCU Pilot
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "Run mode"
+        required: true
+        default: "manual_test"
+        type: choice
+        options:
+          - manual_test
+          - scheduled_window
       slot_hour:
         description: "Scheduled PHT hour, 5 through 12"
         required: true
-        default: "5"
+        default: "6"
         type: string
       retry_end_minute:
-        description: "Stop retrying after this minute"
+        description: "Scheduled mode only: stop retrying after this minute"
         required: true
         default: "15"
         type: string
@@ -18,7 +26,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: dzmm-facebook-ccu-${{ github.event.inputs.slot_hour }}
+  group: dzmm-facebook-ccu-${{ github.event.inputs.mode }}-${{ github.event.inputs.slot_hour }}
   cancel-in-progress: false
 
 jobs:
@@ -28,6 +36,7 @@ jobs:
 
     env:
       TZ: Asia/Manila
+      RUN_MODE: ${{ github.event.inputs.mode }}
       SLOT_HOUR: ${{ github.event.inputs.slot_hour }}
       RETRY_END_MINUTE: ${{ github.event.inputs.retry_end_minute }}
       FB_PAGE_URL: https://www.facebook.com/DZMMTeleradyo.MSPC/
