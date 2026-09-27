@@ -26,7 +26,8 @@ const FB_DZMM = {
   VERSION: 'v1.3.0-alpha.5'
 };
 
-function dispatchDzmmFacebookWorkflow_(slotHour) {
+function dispatchDzmmFacebookWorkflow_(slotHour, mode) {
+  mode = mode || 'scheduled_window';
   const token =
     PropertiesService.getScriptProperties().getProperty('GITHUB_ACTIONS_TOKEN') || '';
 
@@ -49,7 +50,7 @@ function dispatchDzmmFacebookWorkflow_(slotHour) {
     payload: JSON.stringify({
       ref: 'main',
       inputs: {
-        mode: 'scheduled_window',
+        mode: mode,
         slot_hour: String(slotHour),
         retry_end_minute: String(FB_DZMM.END_MINUTE)
       }
@@ -97,7 +98,7 @@ function facebookDzmmDispatchScheduler() {
   }
 
   try {
-    dispatchDzmmFacebookWorkflow_(hour);
+    dispatchDzmmFacebookWorkflow_(hour, 'scheduled_window');
     props.setProperty(dispatchKey, '1');
 
     appendFacebookDispatchLog_(
@@ -153,11 +154,13 @@ function testFacebookDzmmDispatchNow() {
     throw new Error('Current PHT hour is outside 5:00 AM–12:00 PM.');
   }
 
-  dispatchDzmmFacebookWorkflow_(hour);
+  // Manual test ignores the +01..+15 production window and never writes a
+  // production Facebook CCU cell because the callback receives testMode=true.
+  dispatchDzmmFacebookWorkflow_(hour, 'manual_test');
 
   SpreadsheetApp.getActiveSpreadsheet().toast(
-    'Scheduled-window GitHub workflow dispatched for ' +
-    formatFacebookSlot_(hour) + '.',
+    'Manual GitHub Facebook test dispatched for ' +
+    formatFacebookSlot_(hour) + '. Production Facebook cell will stay unchanged.',
     'Facebook CCU Test',
     10
   );
