@@ -1,5 +1,5 @@
 /**
- * Facebook pilot callback receiver — v1.3.0-alpha.2
+ * Facebook pilot callback receiver — v1.3.0-alpha.3
  *
  * Add this to the SAME Apps Script project as the CCU Sheet only when ready to test.
  *
@@ -20,7 +20,8 @@ function doPost(e) {
 
     const now = new Date();
     const channel = String(payload.channel || 'DZMM TeleRadyo');
-    const status = String(payload.status || 'FB_ERROR');
+    const testMode = payload.testMode === true;
+    const status = (testMode ? 'PILOT TEST ' : '') + String(payload.status || 'FB_ERROR');
     const slotHour = Number(payload.slotHour);
     const ccu = payload.ok ? Number(payload.viewerCount) : '';
 
@@ -39,8 +40,8 @@ function doPost(e) {
     const fbCol = 3 + ((slotHour - 5) * 2);
     const target = sh.getRange(6, fbCol);
 
-    // First successful CCU wins. Never overwrite a previously captured value.
-    if (payload.ok && target.getValue() === '') {
+    // Manual pilot tests only log diagnostics; they never write production CCU cells.
+    if (!testMode && payload.ok && target.getValue() === '') {
       target.setValue(ccu);
     }
 
@@ -58,6 +59,7 @@ function doPost(e) {
         payload.liveUrl ? 'Live: ' + payload.liveUrl : '',
         payload.extractionMethod ? 'Method: ' + payload.extractionMethod : '',
         payload.lastStatus ? 'Last status: ' + payload.lastStatus : '',
+        testMode ? 'Manual pilot test only; production Facebook cell unchanged.' : '',
         payload.error || ''
       ].filter(Boolean).join(' | ')
     ]);
