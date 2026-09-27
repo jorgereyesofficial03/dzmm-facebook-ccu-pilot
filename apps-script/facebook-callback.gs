@@ -1,11 +1,22 @@
 /**
- * Facebook pilot callback receiver — v1.3.0-alpha.3
+ * Facebook pilot callback receiver — v1.3.0-alpha.4
  *
  * Add this to the SAME Apps Script project as the CCU Sheet only when ready to test.
  *
  * Script Property required:
  * FB_CALLBACK_SECRET
  */
+
+function doGet() {
+  return ContentService
+    .createTextOutput(JSON.stringify({
+      ok: true,
+      service: 'DZMM Facebook CCU Callback',
+      version: 'v1.3.0-alpha.4',
+      method: 'POST required for callbacks'
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
 
 function doPost(e) {
   try {
