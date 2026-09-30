@@ -23,22 +23,32 @@ on:
         options:
           - manual_test
           - scheduled_window
-      slot_hour:
-        description: "Scheduled PHT hour, 4 through 22"
+      slot_key:
+        description: "Program start key, e.g. 0730"
         required: true
-        default: "16"
+        default: "1600"
         type: string
-      retry_end_minute:
-        description: "Scheduled mode only: stop retrying after this minute"
+      slot_label:
+        description: "Program start label, e.g. 4:00 PM"
         required: true
-        default: "20"
+        default: "4:00 PM"
+        type: string
+      slot_date:
+        description: "PHT scheduled date YYYY-MM-DD"
+        required: true
+        default: "2026-09-30"
+        type: string
+      window_end_minute_of_day:
+        description: "PHT minute-of-day when retry window ends"
+        required: true
+        default: "980"
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: facebook-ccu-${{ github.event.inputs.station_key }}-${{ github.event.inputs.mode }}-${{ github.event.inputs.slot_hour }}
+  group: facebook-ccu-${{ github.event.inputs.station_key }}-${{ github.event.inputs.mode }}-${{ github.event.inputs.slot_date }}-${{ github.event.inputs.slot_key }}
   cancel-in-progress: false
 
 jobs:
@@ -50,8 +60,10 @@ jobs:
       TZ: Asia/Manila
       STATION_KEY: ${{ github.event.inputs.station_key }}
       RUN_MODE: ${{ github.event.inputs.mode }}
-      SLOT_HOUR: ${{ github.event.inputs.slot_hour }}
-      RETRY_END_MINUTE: ${{ github.event.inputs.retry_end_minute }}
+      SLOT_KEY: ${{ github.event.inputs.slot_key }}
+      SLOT_LABEL: ${{ github.event.inputs.slot_label }}
+      SLOT_DATE: ${{ github.event.inputs.slot_date }}
+      WINDOW_END_MINUTE_OF_DAY: ${{ github.event.inputs.window_end_minute_of_day }}
       APPS_SCRIPT_CALLBACK_URL: ${{ secrets.APPS_SCRIPT_CALLBACK_URL }}
       APPS_SCRIPT_CALLBACK_SECRET: ${{ secrets.APPS_SCRIPT_CALLBACK_SECRET }}
 
