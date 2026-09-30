@@ -24,14 +24,14 @@ on:
           - manual_test
           - scheduled_window
       slot_hour:
-        description: "Scheduled PHT hour, 5 through 12"
+        description: "Scheduled PHT hour, 4 through 22"
         required: true
-        default: "7"
+        default: "16"
         type: string
       retry_end_minute:
         description: "Scheduled mode only: stop retrying after this minute"
         required: true
-        default: "15"
+        default: "20"
         type: string
 
 permissions:
