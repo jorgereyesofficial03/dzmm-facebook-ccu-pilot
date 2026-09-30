@@ -41,7 +41,7 @@ const CALLBACK_SECRET = process.env.APPS_SCRIPT_CALLBACK_SECRET || '';
 
 const runMode = process.env.RUN_MODE || 'scheduled_window';
 const requestedSlotHour = Number(process.env.SLOT_HOUR);
-const retryEndMinute = Number(process.env.RETRY_END_MINUTE || 15);
+const retryEndMinute = Number(process.env.RETRY_END_MINUTE || 20);
 const timeZone = 'Asia/Manila';
 
 function nowPhtParts() {
@@ -407,15 +407,15 @@ async function oneAttempt(browser, attemptNo) {
 
 function resolvedSlotHour_(pht) {
   if (Number.isInteger(requestedSlotHour) &&
-      requestedSlotHour >= 5 &&
-      requestedSlotHour <= 12) {
+      requestedSlotHour >= 4 &&
+      requestedSlotHour <= 22) {
     return requestedSlotHour;
   }
 
   if (runMode === 'manual_test' &&
       Number.isInteger(pht.hour) &&
-      pht.hour >= 5 &&
-      pht.hour <= 12) {
+      pht.hour >= 4 &&
+      pht.hour <= 22) {
     return pht.hour;
   }
 
