@@ -1,8 +1,8 @@
 /**
- * Facebook multi-channel callback receiver — v1.5.0-alpha.1
+ * Facebook multi-channel callback receiver — v1.5.0-alpha.2
  *
- * Production window:
- * 4:00 AM through 10:00 PM PHT
+ * Writes directly to the existing LIVE STREAM multi-channel table.
+ * Production window: 4:00 AM through 10:00 PM PHT.
  * Capture attempt starts at +15 and ends at +20.
  *
  * Script Property required:
@@ -14,19 +14,16 @@ const FB_CALLBACK = {
   START_HOUR: 4,
   END_HOUR: 22,
   MAIN_SHEET: 'LIVE STREAM',
-  EXTENDED_DATE_CELL: 'B73',
-  EXTENDED_FIRST_VALUE_COL: 2,
-  LEGACY_START_HOUR: 5,
-  LEGACY_END_HOUR: 12
+  TABLE_START_HOUR: 4
 };
 
 const FB_CALLBACK_CHANNELS = {
-  dzmm: { channel: 'DZMM TeleRadyo', legacyRow: 6, extendedRow: 75 },
-  dzbb: { channel: 'DZBB Super Radyo', legacyRow: 7, extendedRow: 76 },
-  dzrh: { channel: 'DZRH', legacyRow: 9, extendedRow: 77 },
-  dwww: { channel: 'DWWW', legacyRow: 10, extendedRow: 78 },
-  dwxi: { channel: 'DWXI', legacyRow: 11, extendedRow: 79 },
-  dzrv: { channel: 'DZRV / Veritas PH', legacyRow: 12, extendedRow: 80 }
+  dzmm: { channel: 'DZMM TeleRadyo', row: 6 },
+  dzbb: { channel: 'DZBB Super Radyo', row: 7 },
+  dzrh: { channel: 'DZRH', row: 9 },
+  dwww: { channel: 'DWWW', row: 10 },
+  dwxi: { channel: 'DWXI', row: 11 },
+  dzrv: { channel: 'DZRV / Veritas PH', row: 12 }
 };
 
 function doGet() {
@@ -34,9 +31,10 @@ function doGet() {
     .createTextOutput(JSON.stringify({
       ok: true,
       service: 'Facebook Multi-Channel CCU Callback',
-      version: 'v1.5.0-alpha.1',
+      version: 'v1.5.0-alpha.2',
       productionHours: '4:00 AM-10:00 PM PHT',
       captureWindow: '+15 to +20',
+      output: 'LIVE STREAM main multi-channel table',
       method: 'POST required for callbacks'
     }))
     .setMimeType(ContentService.MimeType.JSON);
@@ -84,32 +82,15 @@ function doPost(e) {
     const sh = ss.getSheetByName(FB_CALLBACK.MAIN_SHEET);
     const log = ss.getSheetByName('LOG');
 
-    const extendedCol =
-      FB_CALLBACK.EXTENDED_FIRST_VALUE_COL +
-      (slotHour - FB_CALLBACK.START_HOUR);
+    // Main table layout:
+    // 4AM = B/C, 5AM = D/E, ... 10PM = AL/AM.
+    // YouTube is the first column of each pair; Facebook is the second.
+    const fbCol = 3 + ((slotHour - FB_CALLBACK.TABLE_START_HOUR) * 2);
+    const target = sh.getRange(cfg.row, fbCol);
 
-    const extendedTarget = sh.getRange(cfg.extendedRow, extendedCol);
-
-    // Manual tests log only.
-    // Production: first successful CCU wins for each station/hour.
-    if (!testMode && payload.ok && extendedTarget.getValue() === '') {
-      extendedTarget.setValue(ccu);
-    }
-
-    // Keep the original 5AM-12PM Facebook cells populated as a legacy mirror
-    // so the existing combined YouTube/Facebook table continues to work.
-    if (
-      !testMode &&
-      payload.ok &&
-      slotHour >= FB_CALLBACK.LEGACY_START_HOUR &&
-      slotHour <= FB_CALLBACK.LEGACY_END_HOUR
-    ) {
-      const legacyCol = 3 + ((slotHour - FB_CALLBACK.LEGACY_START_HOUR) * 2);
-      const legacyTarget = sh.getRange(cfg.legacyRow, legacyCol);
-
-      if (legacyTarget.getValue() === '') {
-        legacyTarget.setValue(ccu);
-      }
+    // Manual tests log only. Production: first successful CCU wins.
+    if (!testMode && payload.ok && target.getValue() === '') {
+      target.setValue(ccu);
     }
 
     log.appendRow([
@@ -126,7 +107,7 @@ function doPost(e) {
         payload.liveUrl ? 'Live: ' + payload.liveUrl : '',
         payload.extractionMethod ? 'Method: ' + payload.extractionMethod : '',
         payload.lastStatus ? 'Last status: ' + payload.lastStatus : '',
-        testMode ? 'Manual multi-channel pilot test; production Facebook cells unchanged.' : '',
+        testMode ? 'Manual multi-channel pilot test; production Facebook cell unchanged.' : '',
         payload.error || ''
       ].filter(Boolean).join(' | ')
     ]);
@@ -135,7 +116,7 @@ function doPost(e) {
       .createTextOutput(JSON.stringify({
         ok: true,
         stationKey: stationKey,
-        extendedRow: cfg.extendedRow,
+        row: cfg.row,
         productionWritten: !testMode && payload.ok
       }))
       .setMimeType(ContentService.MimeType.JSON);
