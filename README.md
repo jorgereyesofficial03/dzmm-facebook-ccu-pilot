@@ -1,75 +1,54 @@
 # Facebook CCU Multi-Channel Automation
 
-Browser-based Facebook **current concurrent viewer (CCU)** monitoring for the radio stations in the CCU Google Sheet.
+Browser-based Facebook **current concurrent viewer (CCU)** monitoring for six radio/media Pages.
 
 ## Version
 
-**v1.4.0-alpha.3 — Multi-channel test build**
+**v1.5.0-alpha.1**
 
 YouTube automation remains separate.
 
 ## Facebook stations
 
-- DZMM TeleRadyo — https://www.facebook.com/DZMMTeleradyo.MSPC/
-- DZBB Super Radyo — https://www.facebook.com/dzbb594/
-- DZRH — https://www.facebook.com/dzrhnews/
-- DWWW — https://www.facebook.com/DWWW774/
-- DWXI — https://www.facebook.com/dwxi1314khz/
-- DZRV / Veritas PH — https://www.facebook.com/DZRV846/
+- DZMM TeleRadyo
+- DZBB Super Radyo
+- DZRH
+- DWWW
+- DWXI
+- DZRV / Veritas PH
 
 For Facebook, the rule is **ANY current LIVE** on the configured Page.
 
 ## Production capture rule
 
-For each scheduled hour from **5:00 AM through 12:00 PM, Asia/Manila**:
+For every hourly slot from **4:00 AM through 10:00 PM, Asia/Manila**:
 
-1. Apps Script dispatches one GitHub workflow per station from **+01**.
-2. Each workflow retries its own Page until a valid current-viewer count is found.
-3. First successful viewer count wins for that station/hour.
-4. Last attempt boundary is **+15**.
-5. If no valid count is available by +15, the Facebook cell remains blank for that hour.
-6. No late backfill; next scheduled hour starts fresh.
+1. The Apps Script scheduler waits until **+15 minutes** after the hour.
+2. At +15 it dispatches one GitHub workflow per station.
+3. Each workflow retries until a valid current-viewer count is found or the clock reaches **+20**.
+4. The first successful viewer count wins for that station/hour.
+5. If no valid count is available by +20, that station/hour remains blank.
+6. No late backfill; the next hourly slot starts fresh.
+
+Example:
+
+- 4:00 AM slot → first check around 4:15 AM → retry through 4:20 AM.
+- 4:00 PM slot → first check around 4:15 PM → retry through 4:20 PM.
+- 10:00 PM slot → first check around 10:15 PM → retry through 10:20 PM.
+
+## Google Sheet output
+
+The primary Facebook extended table is on the **LIVE STREAM** sheet and covers **4:00 AM-10:00 PM**.
+
+The existing combined YouTube/Facebook table for **5:00 AM-12:00 PM** is retained as a legacy mirror for Facebook, so the current daily report remains compatible.
 
 ## Manual test
 
-Use Apps Script function:
+Use Apps Script:
 
 `testFacebookAllDispatchNow()`
 
-It launches six `manual_test` workflows. Manual tests write diagnostics to LOG but do not write production Facebook CCU cells.
-
-## Callback row mapping
-
-- DZMM → row 6
-- DZBB → row 7
-- DZRH → row 9
-- DWWW → row 10
-- DWXI → row 11
-- DZRV / Veritas PH → row 12
-
-## Authentication rule
-
-The worker may close a removable **"See more on Facebook"** overlay if public content remains accessible. It does not bypass a genuine login requirement.
-
-## Multi-channel test checkpoint — 2026-09-28
-
-Passed current-live detection + viewer extraction:
-- DZMM TeleRadyo
-- DZBB Super Radyo
-- DZRH
-- DWWW
-- DZRV / Veritas PH
-
-DWXI initially selected an old video because Facebook's navigation word "Live" was too broad a discovery signal. v1.4.0-alpha.2 tightened discovery. v1.4.0-alpha.3 also treats a visible login banner/modal as non-blocking when public Page content is still rendered, so a public Page with no current live correctly returns FB_NO_LIVE instead of FB_LOGIN_REQUIRED. Manual tests also fall back to the current PHT hour if slot_hour is omitted.
-
-## Diagnostics
-
-- `OK`
-- `FB_NO_LIVE`
-- `FB_VIEWER_UNAVAILABLE`
-- `FB_LOGIN_REQUIRED`
-- `FB_TIMEOUT`
-- `FB_ERROR`
+Manual tests write diagnostics to LOG but do not write production Facebook cells.
 
 ## Secrets
 
