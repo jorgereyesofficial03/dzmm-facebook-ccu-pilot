@@ -1,17 +1,32 @@
 /**
- * Facebook multi-channel callback receiver — v1.4.0-alpha.1
+ * Facebook multi-channel callback receiver — v1.5.0-alpha.1
+ *
+ * Production window:
+ * 4:00 AM through 10:00 PM PHT
+ * Capture attempt starts at +15 and ends at +20.
  *
  * Script Property required:
  * FB_CALLBACK_SECRET
  */
 
+const FB_CALLBACK = {
+  TZ: 'Asia/Manila',
+  START_HOUR: 4,
+  END_HOUR: 22,
+  MAIN_SHEET: 'LIVE STREAM',
+  EXTENDED_DATE_CELL: 'B73',
+  EXTENDED_FIRST_VALUE_COL: 2,
+  LEGACY_START_HOUR: 5,
+  LEGACY_END_HOUR: 12
+};
+
 const FB_CALLBACK_CHANNELS = {
-  dzmm: { channel: 'DZMM TeleRadyo', row: 6 },
-  dzbb: { channel: 'DZBB Super Radyo', row: 7 },
-  dzrh: { channel: 'DZRH', row: 9 },
-  dwww: { channel: 'DWWW', row: 10 },
-  dwxi: { channel: 'DWXI', row: 11 },
-  dzrv: { channel: 'DZRV / Veritas PH', row: 12 }
+  dzmm: { channel: 'DZMM TeleRadyo', legacyRow: 6, extendedRow: 75 },
+  dzbb: { channel: 'DZBB Super Radyo', legacyRow: 7, extendedRow: 76 },
+  dzrh: { channel: 'DZRH', legacyRow: 9, extendedRow: 77 },
+  dwww: { channel: 'DWWW', legacyRow: 10, extendedRow: 78 },
+  dwxi: { channel: 'DWXI', legacyRow: 11, extendedRow: 79 },
+  dzrv: { channel: 'DZRV / Veritas PH', legacyRow: 12, extendedRow: 80 }
 };
 
 function doGet() {
@@ -19,7 +34,9 @@ function doGet() {
     .createTextOutput(JSON.stringify({
       ok: true,
       service: 'Facebook Multi-Channel CCU Callback',
-      version: 'v1.4.0-alpha.1',
+      version: 'v1.5.0-alpha.1',
+      productionHours: '4:00 AM-10:00 PM PHT',
+      captureWindow: '+15 to +20',
       method: 'POST required for callbacks'
     }))
     .setMimeType(ContentService.MimeType.JSON);
@@ -51,7 +68,11 @@ function doPost(e) {
     const slotHour = Number(payload.slotHour);
     const ccu = payload.ok ? Number(payload.viewerCount) : '';
 
-    if (!Number.isInteger(slotHour) || slotHour < 5 || slotHour > 12) {
+    if (
+      !Number.isInteger(slotHour) ||
+      slotHour < FB_CALLBACK.START_HOUR ||
+      slotHour > FB_CALLBACK.END_HOUR
+    ) {
       throw new Error('Invalid slotHour: ' + payload.slotHour);
     }
 
@@ -60,22 +81,41 @@ function doPost(e) {
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sh = ss.getSheetByName('LIVE STREAM');
+    const sh = ss.getSheetByName(FB_CALLBACK.MAIN_SHEET);
     const log = ss.getSheetByName('LOG');
 
-    // Facebook columns: C,E,G,I,K,M,O,Q for 5AM..12PM.
-    const fbCol = 3 + ((slotHour - 5) * 2);
-    const target = sh.getRange(cfg.row, fbCol);
+    const extendedCol =
+      FB_CALLBACK.EXTENDED_FIRST_VALUE_COL +
+      (slotHour - FB_CALLBACK.START_HOUR);
 
-    // Manual tests log only. Production: first successful CCU wins.
-    if (!testMode && payload.ok && target.getValue() === '') {
-      target.setValue(ccu);
+    const extendedTarget = sh.getRange(cfg.extendedRow, extendedCol);
+
+    // Manual tests log only.
+    // Production: first successful CCU wins for each station/hour.
+    if (!testMode && payload.ok && extendedTarget.getValue() === '') {
+      extendedTarget.setValue(ccu);
+    }
+
+    // Keep the original 5AM-12PM Facebook cells populated as a legacy mirror
+    // so the existing combined YouTube/Facebook table continues to work.
+    if (
+      !testMode &&
+      payload.ok &&
+      slotHour >= FB_CALLBACK.LEGACY_START_HOUR &&
+      slotHour <= FB_CALLBACK.LEGACY_END_HOUR
+    ) {
+      const legacyCol = 3 + ((slotHour - FB_CALLBACK.LEGACY_START_HOUR) * 2);
+      const legacyTarget = sh.getRange(cfg.legacyRow, legacyCol);
+
+      if (legacyTarget.getValue() === '') {
+        legacyTarget.setValue(ccu);
+      }
     }
 
     log.appendRow([
-      Utilities.formatDate(now, 'Asia/Manila', 'yyyy-MM-dd HH:mm:ss'),
-      slotHour === 12 ? '12:00 PM' : slotHour + ':00 AM',
-      payload.date || Utilities.formatDate(now, 'Asia/Manila', 'yyyy-MM-dd'),
+      Utilities.formatDate(now, FB_CALLBACK.TZ, 'yyyy-MM-dd HH:mm:ss'),
+      formatFacebookCallbackSlot_(slotHour),
+      payload.date || Utilities.formatDate(now, FB_CALLBACK.TZ, 'yyyy-MM-dd'),
       cfg.channel,
       'Facebook',
       '',
@@ -86,7 +126,7 @@ function doPost(e) {
         payload.liveUrl ? 'Live: ' + payload.liveUrl : '',
         payload.extractionMethod ? 'Method: ' + payload.extractionMethod : '',
         payload.lastStatus ? 'Last status: ' + payload.lastStatus : '',
-        testMode ? 'Manual multi-channel pilot test; production Facebook cell unchanged.' : '',
+        testMode ? 'Manual multi-channel pilot test; production Facebook cells unchanged.' : '',
         payload.error || ''
       ].filter(Boolean).join(' | ')
     ]);
@@ -95,7 +135,7 @@ function doPost(e) {
       .createTextOutput(JSON.stringify({
         ok: true,
         stationKey: stationKey,
-        row: cfg.row,
+        extendedRow: cfg.extendedRow,
         productionWritten: !testMode && payload.ok
       }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -109,4 +149,11 @@ function doPost(e) {
       }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+function formatFacebookCallbackSlot_(hour) {
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  let h = hour % 12;
+  if (h === 0) h = 12;
+  return h + ':00 ' + suffix;
 }
