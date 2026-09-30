@@ -1,10 +1,11 @@
 /**
- * Facebook multi-channel GitHub dispatcher — v1.5.0-alpha.2
+ * Facebook multi-channel GitHub dispatcher — v1.6.0-alpha.1
  * Timezone: Asia/Manila
  *
- * Writes to the existing LIVE STREAM multi-channel table.
- * Production hours: 4:00 AM through 10:00 PM.
- * Each hourly slot starts checking at +15 and may retry through +20.
+ * Schedule source: PROGRAM SCHEDULE sheet.
+ * Weekday/Saturday/Sunday program START times are used as CCU checkpoints.
+ * Only starts from 4:00 AM through 10:00 PM are monitored.
+ * Each slot dispatches at +15 and retries through +20.
  *
  * Script Property required:
  * GITHUB_ACTIONS_TOKEN
@@ -12,16 +13,16 @@
 
 const FB_MULTI = {
   TZ: 'Asia/Manila',
-  START_HOUR: 4,
-  END_HOUR: 22,
-  TABLE_START_HOUR: 4,
-  START_MINUTE: 15,
-  END_MINUTE: 20,
+  SCHEDULE_SHEET: 'PROGRAM SCHEDULE',
   MAIN_SHEET: 'LIVE STREAM',
   LOG_SHEET: 'LOG',
+  START_OFFSET: 15,
+  END_OFFSET: 20,
+  MIN_START: 4 * 60,
+  MAX_START: 22 * 60,
   REPO: 'jorgereyesofficial03/dzmm-facebook-ccu-pilot',
   WORKFLOW: 'dzmm-facebook-ccu.yml',
-  VERSION: 'v1.5.0-alpha.2',
+  VERSION: 'v1.6.0-alpha.1',
   CHANNELS: [
     { key: 'dzmm', channel: 'DZMM TeleRadyo', row: 6 },
     { key: 'dzbb', channel: 'DZBB Super Radyo', row: 7 },
@@ -32,15 +33,12 @@ const FB_MULTI = {
   ]
 };
 
-function dispatchFacebookWorkflow_(stationKey, slotHour, mode) {
+function dispatchFacebookWorkflow_(stationKey, slot, mode) {
   mode = mode || 'scheduled_window';
 
   const token =
     PropertiesService.getScriptProperties().getProperty('GITHUB_ACTIONS_TOKEN') || '';
-
-  if (!token) {
-    throw new Error('Missing GITHUB_ACTIONS_TOKEN Script Property.');
-  }
+  if (!token) throw new Error('Missing GITHUB_ACTIONS_TOKEN Script Property.');
 
   const url =
     'https://api.github.com/repos/' + FB_MULTI.REPO +
@@ -59,8 +57,10 @@ function dispatchFacebookWorkflow_(stationKey, slotHour, mode) {
       inputs: {
         station_key: String(stationKey),
         mode: mode,
-        slot_hour: String(slotHour),
-        retry_end_minute: String(FB_MULTI.END_MINUTE)
+        slot_key: slot.key,
+        slot_label: slot.label,
+        slot_date: slot.dateKey,
+        window_end_minute_of_day: String(slot.windowEnd)
       }
     }),
     muteHttpExceptions: true
@@ -69,66 +69,50 @@ function dispatchFacebookWorkflow_(stationKey, slotHour, mode) {
   if (response.getResponseCode() !== 204) {
     throw new Error(
       stationKey + ' GitHub dispatch failed: HTTP ' +
-      response.getResponseCode() + ' ' +
-      response.getContentText()
+      response.getResponseCode() + ' ' + response.getContentText()
     );
   }
 }
 
 function facebookAllDispatchScheduler() {
   const now = new Date();
-  const hour = Number(Utilities.formatDate(now, FB_MULTI.TZ, 'H'));
-  const minute = Number(Utilities.formatDate(now, FB_MULTI.TZ, 'm'));
+  const slot = fbFindActiveProgramSlot_(now);
+  if (!slot) return;
 
-  if (hour < FB_MULTI.START_HOUR || hour > FB_MULTI.END_HOUR) return;
-  if (minute < FB_MULTI.START_MINUTE || minute > FB_MULTI.END_MINUTE) return;
-
-  const dateKey = Utilities.formatDate(now, FB_MULTI.TZ, 'yyyy-MM-dd');
+  const dateKey = slot.dateKey;
   cleanupOldFacebookDispatchFlags_(dateKey);
-  prepareFacebookMainTable_(now);
 
   const props = PropertiesService.getScriptProperties();
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FB_MULTI.MAIN_SHEET);
-
   if (!sh) throw new Error('Missing sheet: ' + FB_MULTI.MAIN_SHEET);
 
-  const fbCol = 3 + ((hour - FB_MULTI.TABLE_START_HOUR) * 2);
+  const fbCol = fbFindPlatformColumn_(sh, slot.label, 'Facebook');
+  if (!fbCol) throw new Error('Facebook column not found for slot ' + slot.label);
 
   FB_MULTI.CHANNELS.forEach(cfg => {
     const dispatchKey =
-      'FB_DISPATCH_' + cfg.key + '_' + dateKey + '_' +
-      String(hour).padStart(2, '0');
+      'FB_DISPATCH_' + cfg.key + '_' + dateKey + '_' + slot.key;
 
     if (props.getProperty(dispatchKey) === '1') return;
 
     const target = sh.getRange(cfg.row, fbCol);
-
     if (target.getValue() !== '') {
       props.setProperty(dispatchKey, '1');
       return;
     }
 
     try {
-      dispatchFacebookWorkflow_(cfg.key, hour, 'scheduled_window');
+      dispatchFacebookWorkflow_(cfg.key, slot, 'scheduled_window');
       props.setProperty(dispatchKey, '1');
 
       appendFacebookDispatchLog_(
-        now,
-        hour,
-        dateKey,
-        cfg.channel,
-        'DISPATCHED',
-        'GitHub scheduled_window started automatically at +' +
-        String(FB_MULTI.START_MINUTE).padStart(2, '0') +
-        ' for ' + cfg.key + '.'
+        now, slot, cfg.channel, 'DISPATCHED',
+        'GitHub scheduled_window started for ' + cfg.key +
+        ' at +' + FB_MULTI.START_OFFSET + ' after program start.'
       );
     } catch (err) {
       appendFacebookDispatchLog_(
-        now,
-        hour,
-        dateKey,
-        cfg.channel,
-        'DISPATCH_ERROR',
+        now, slot, cfg.channel, 'DISPATCH_ERROR',
         err && err.message ? err.message : String(err)
       );
     }
@@ -144,16 +128,14 @@ function setupFacebookAllAutomation() {
     }
   });
 
-  prepareFacebookMainTable_(new Date());
-
   ScriptApp.newTrigger('facebookAllDispatchScheduler')
     .timeBased()
     .everyMinutes(1)
     .create();
 
   SpreadsheetApp.getActiveSpreadsheet().toast(
-    'Facebook multi-channel automation installed for 6 stations, 4:00 AM-10:00 PM. ' +
-    'Each hourly slot starts at +15 and retries through +20.',
+    'Facebook schedule-aware automation installed. ' +
+    'Program starts from 4:00 AM-10:00 PM; capture window is +15 to +20.',
     'Facebook CCU ' + FB_MULTI.VERSION,
     10
   );
@@ -169,74 +151,142 @@ function removeFacebookAllAutomation() {
 
 function testFacebookAllDispatchNow() {
   const now = new Date();
-  const hour = Number(Utilities.formatDate(now, FB_MULTI.TZ, 'H'));
+  const slots = fbLoadTodaySlots_(now);
+  if (!slots.length) throw new Error('No configured program slots for today.');
 
-  if (hour < FB_MULTI.START_HOUR || hour > FB_MULTI.END_HOUR) {
-    throw new Error('Current PHT hour is outside 4:00 AM-10:00 PM.');
-  }
+  const current = fbMinuteOfDay_(now);
+  let slot = slots.filter(s => s.start <= current).slice(-1)[0] || slots[0];
 
   let dispatched = 0;
-  let failed = 0;
   const failures = [];
 
   FB_MULTI.CHANNELS.forEach(cfg => {
     try {
-      dispatchFacebookWorkflow_(cfg.key, hour, 'manual_test');
+      dispatchFacebookWorkflow_(cfg.key, slot, 'manual_test');
       dispatched++;
     } catch (err) {
-      failed++;
       failures.push(cfg.key + ': ' + (err && err.message ? err.message : String(err)));
     }
   });
 
   SpreadsheetApp.getActiveSpreadsheet().toast(
     'Facebook manual tests dispatched: ' + dispatched +
-    '; dispatch failures: ' + failed + '. Check GitHub Actions + LOG.',
+    '. Test slot: ' + slot.label + '.',
     'Facebook CCU Multi-Channel Test',
     10
   );
 
-  if (failures.length) {
-    throw new Error(failures.join('\n'));
-  }
+  if (failures.length) throw new Error(failures.join('\n'));
 }
 
-function resetFacebookAllDispatchThisHour() {
+function resetFacebookCurrentSlot() {
   const now = new Date();
-  const hour = Number(Utilities.formatDate(now, FB_MULTI.TZ, 'H'));
-  const dateKey = Utilities.formatDate(now, FB_MULTI.TZ, 'yyyy-MM-dd');
-  const props = PropertiesService.getScriptProperties();
+  const slot = fbFindActiveProgramSlot_(now);
+  if (!slot) throw new Error('No active +15..+20 program capture window right now.');
 
+  const props = PropertiesService.getScriptProperties();
   FB_MULTI.CHANNELS.forEach(cfg => {
     props.deleteProperty(
-      'FB_DISPATCH_' + cfg.key + '_' + dateKey + '_' +
-      String(hour).padStart(2, '0')
+      'FB_DISPATCH_' + cfg.key + '_' + slot.dateKey + '_' + slot.key
     );
   });
 
   SpreadsheetApp.getActiveSpreadsheet().toast(
-    'All Facebook dispatch flags reopened for ' + formatFacebookSlot_(hour) + '.',
+    'Facebook dispatch flags reopened for ' + slot.label + '.',
     'Facebook CCU',
     8
   );
 }
 
-function prepareFacebookMainTable_(now) {
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FB_MULTI.MAIN_SHEET);
-  if (!sh) throw new Error('Missing sheet: ' + FB_MULTI.MAIN_SHEET);
+function fbFindActiveProgramSlot_(now) {
+  const current = fbMinuteOfDay_(now);
+  const slots = fbLoadTodaySlots_(now);
 
-  const dateDisplay = Utilities.formatDate(now, FB_MULTI.TZ, 'dd-MMM-yyyy');
-  const dateCell = sh.getRange('B2');
-  const current = String(dateCell.getDisplayValue()).trim();
+  return slots.find(slot =>
+    current >= slot.windowStart &&
+    current <= slot.windowEnd
+  ) || null;
+}
 
-  if (current !== dateDisplay) {
-    dateCell.setValue(dateDisplay);
-    sh.getRange('B6:AM12').clearContent();
-    sh.getRange('B14').setValue(
-      'YouTube: 5:00 AM-12:00 PM (+00 to +20). ' +
-      'Facebook: 4:00 AM-10:00 PM (+15 to +20).'
-    );
+function fbLoadTodaySlots_(now) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(FB_MULTI.SCHEDULE_SHEET);
+  if (!sh) throw new Error('Missing sheet: ' + FB_MULTI.SCHEDULE_SHEET);
+
+  const dayType = fbDayType_(now);
+  const dateKey = Utilities.formatDate(now, FB_MULTI.TZ, 'yyyy-MM-dd');
+  const rows = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 6).getValues();
+
+  const map = new Map();
+
+  rows.forEach(r => {
+    if (String(r[0]).trim().toUpperCase() !== dayType) return;
+    if (r[4] !== true) return;
+
+    const label = String(r[1]).trim();
+    const start = fbParseTime_(label);
+    if (start === null || start < FB_MULTI.MIN_START || start > FB_MULTI.MAX_START) return;
+
+    const key = fbSlotKey_(start);
+
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        label,
+        start,
+        windowStart: start + FB_MULTI.START_OFFSET,
+        windowEnd: start + FB_MULTI.END_OFFSET,
+        dateKey,
+        programs: []
+      });
+    }
+    map.get(key).programs.push(String(r[3] || '').trim());
+  });
+
+  return Array.from(map.values()).sort((a, b) => a.start - b.start);
+}
+
+function fbFindPlatformColumn_(sh, slotLabel, platform) {
+  const headers = sh.getRange(4, 1, 2, sh.getLastColumn()).getDisplayValues();
+  for (let c = 1; c < headers[0].length; c++) {
+    if (
+      String(headers[0][c]).trim() === slotLabel &&
+      String(headers[1][c]).trim() === platform
+    ) {
+      return c + 1;
+    }
   }
+  return null;
+}
+
+function fbDayType_(now) {
+  const dow = Number(Utilities.formatDate(now, FB_MULTI.TZ, 'u'));
+  if (dow === 6) return 'SATURDAY';
+  if (dow === 7) return 'SUNDAY';
+  return 'WEEKDAY';
+}
+
+function fbMinuteOfDay_(now) {
+  const h = Number(Utilities.formatDate(now, FB_MULTI.TZ, 'H'));
+  const m = Number(Utilities.formatDate(now, FB_MULTI.TZ, 'm'));
+  return h * 60 + m;
+}
+
+function fbParseTime_(label) {
+  const m = String(label || '').trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = Number(m[2]);
+  const ap = m[3].toUpperCase();
+  if (ap === 'PM' && h !== 12) h += 12;
+  if (ap === 'AM' && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+function fbSlotKey_(minuteOfDay) {
+  const h = Math.floor(minuteOfDay / 60);
+  const m = minuteOfDay % 60;
+  return String(h).padStart(2, '0') + String(m).padStart(2, '0');
 }
 
 function cleanupOldFacebookDispatchFlags_(dateKey) {
@@ -250,37 +300,24 @@ function cleanupOldFacebookDispatchFlags_(dateKey) {
     ) {
       props.deleteProperty(key);
     }
-
-    if (
-      key.indexOf('FB_DZMM_DISPATCH_') === 0 &&
-      key.indexOf('FB_DZMM_DISPATCH_' + dateKey + '_') !== 0
-    ) {
-      props.deleteProperty(key);
-    }
   });
 }
 
-function appendFacebookDispatchLog_(now, hour, dateKey, channel, status, notes) {
+function appendFacebookDispatchLog_(now, slot, channel, status, notes) {
   const log = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FB_MULTI.LOG_SHEET);
   if (!log) return;
 
   log.appendRow([
     Utilities.formatDate(now, FB_MULTI.TZ, 'yyyy-MM-dd HH:mm:ss'),
-    formatFacebookSlot_(hour),
-    dateKey,
+    slot.label,
+    slot.dateKey,
     channel,
     'Facebook',
     '',
     '',
     '',
     status,
-    notes
+    notes + ' | Slot: ' + slot.key +
+    (slot.programs.length ? ' | Program: ' + slot.programs.join(' / ') : '')
   ]);
-}
-
-function formatFacebookSlot_(hour) {
-  const suffix = hour >= 12 ? 'PM' : 'AM';
-  let h = hour % 12;
-  if (h === 0) h = 12;
-  return h + ':00 ' + suffix;
 }
