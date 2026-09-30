@@ -1,6 +1,9 @@
 /**
- * Facebook multi-channel GitHub dispatcher — v1.4.0-alpha.1
+ * Facebook multi-channel GitHub dispatcher — v1.5.0-alpha.1
  * Timezone: Asia/Manila
+ *
+ * Production hours: 4:00 AM through 10:00 PM.
+ * Each hourly slot starts checking at +15 and may retry through +20.
  *
  * Script Property required:
  * GITHUB_ACTIONS_TOKEN
@@ -8,22 +11,25 @@
 
 const FB_MULTI = {
   TZ: 'Asia/Manila',
-  START_HOUR: 5,
-  END_HOUR: 12,
-  START_MINUTE: 1,
-  END_MINUTE: 15,
+  START_HOUR: 4,
+  END_HOUR: 22,
+  START_MINUTE: 15,
+  END_MINUTE: 20,
   MAIN_SHEET: 'LIVE STREAM',
   LOG_SHEET: 'LOG',
+  EXTENDED_DATE_CELL: 'B73',
+  EXTENDED_HEADER_ROW: 74,
+  EXTENDED_FIRST_VALUE_COL: 2,
   REPO: 'jorgereyesofficial03/dzmm-facebook-ccu-pilot',
   WORKFLOW: 'dzmm-facebook-ccu.yml',
-  VERSION: 'v1.4.0-alpha.1',
+  VERSION: 'v1.5.0-alpha.1',
   CHANNELS: [
-    { key: 'dzmm', channel: 'DZMM TeleRadyo', row: 6 },
-    { key: 'dzbb', channel: 'DZBB Super Radyo', row: 7 },
-    { key: 'dzrh', channel: 'DZRH', row: 9 },
-    { key: 'dwww', channel: 'DWWW', row: 10 },
-    { key: 'dwxi', channel: 'DWXI', row: 11 },
-    { key: 'dzrv', channel: 'DZRV / Veritas PH', row: 12 }
+    { key: 'dzmm', channel: 'DZMM TeleRadyo', extendedRow: 75 },
+    { key: 'dzbb', channel: 'DZBB Super Radyo', extendedRow: 76 },
+    { key: 'dzrh', channel: 'DZRH', extendedRow: 77 },
+    { key: 'dwww', channel: 'DWWW', extendedRow: 78 },
+    { key: 'dwxi', channel: 'DWXI', extendedRow: 79 },
+    { key: 'dzrv', channel: 'DZRV / Veritas PH', extendedRow: 80 }
   ]
 };
 
@@ -80,13 +86,16 @@ function facebookAllDispatchScheduler() {
 
   const dateKey = Utilities.formatDate(now, FB_MULTI.TZ, 'yyyy-MM-dd');
   cleanupOldFacebookDispatchFlags_(dateKey);
+  prepareFacebookExtendedTable_(now);
 
   const props = PropertiesService.getScriptProperties();
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FB_MULTI.MAIN_SHEET);
 
   if (!sh) throw new Error('Missing sheet: ' + FB_MULTI.MAIN_SHEET);
 
-  const fbCol = 3 + ((hour - FB_MULTI.START_HOUR) * 2);
+  const extendedCol =
+    FB_MULTI.EXTENDED_FIRST_VALUE_COL +
+    (hour - FB_MULTI.START_HOUR);
 
   FB_MULTI.CHANNELS.forEach(cfg => {
     const dispatchKey =
@@ -95,7 +104,7 @@ function facebookAllDispatchScheduler() {
 
     if (props.getProperty(dispatchKey) === '1') return;
 
-    const target = sh.getRange(cfg.row, fbCol);
+    const target = sh.getRange(cfg.extendedRow, extendedCol);
 
     if (target.getValue() !== '') {
       props.setProperty(dispatchKey, '1');
@@ -112,10 +121,13 @@ function facebookAllDispatchScheduler() {
         dateKey,
         cfg.channel,
         'DISPATCHED',
-        'GitHub scheduled_window started automatically for ' + cfg.key + '.'
+        'GitHub scheduled_window started automatically at +' +
+        String(FB_MULTI.START_MINUTE).padStart(2, '0') +
+        ' for ' + cfg.key + '.'
       );
     } catch (err) {
-      // Keep flag open; next minute can retry dispatch within +01..+15.
+      // Keep flag open; the every-minute trigger can retry the GitHub dispatch
+      // itself through +20 if the dispatch request fails.
       appendFacebookDispatchLog_(
         now,
         hour,
@@ -131,12 +143,13 @@ function facebookAllDispatchScheduler() {
 function setupFacebookAllAutomation() {
   removeFacebookAllAutomation();
 
-  // Also remove the old DZMM-only production trigger.
   ScriptApp.getProjectTriggers().forEach(trigger => {
     if (trigger.getHandlerFunction() === 'facebookDzmmDispatchScheduler') {
       ScriptApp.deleteTrigger(trigger);
     }
   });
+
+  prepareFacebookExtendedTable_(new Date());
 
   ScriptApp.newTrigger('facebookAllDispatchScheduler')
     .timeBased()
@@ -144,8 +157,8 @@ function setupFacebookAllAutomation() {
     .create();
 
   SpreadsheetApp.getActiveSpreadsheet().toast(
-    'Facebook multi-channel automation installed for 6 stations. ' +
-    'Each station dispatches once per hour from +01; GitHub retries through +15.',
+    'Facebook multi-channel automation installed for 6 stations, 4:00 AM-10:00 PM. ' +
+    'Each hourly slot starts at +15 and retries through +20.',
     'Facebook CCU ' + FB_MULTI.VERSION,
     10
   );
@@ -164,7 +177,7 @@ function testFacebookAllDispatchNow() {
   const hour = Number(Utilities.formatDate(now, FB_MULTI.TZ, 'H'));
 
   if (hour < FB_MULTI.START_HOUR || hour > FB_MULTI.END_HOUR) {
-    throw new Error('Current PHT hour is outside 5:00 AM–12:00 PM.');
+    throw new Error('Current PHT hour is outside 4:00 AM-10:00 PM.');
   }
 
   let dispatched = 0;
@@ -213,6 +226,46 @@ function resetFacebookAllDispatchThisHour() {
   );
 }
 
+function prepareFacebookExtendedTable_(now) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FB_MULTI.MAIN_SHEET);
+  if (!sh) throw new Error('Missing sheet: ' + FB_MULTI.MAIN_SHEET);
+
+  syncFacebookExtendedHeaders_();
+
+  const dateDisplay = Utilities.formatDate(now, FB_MULTI.TZ, 'dd-MMM-yyyy');
+  const dateCell = sh.getRange(FB_MULTI.EXTENDED_DATE_CELL);
+  const current = String(dateCell.getDisplayValue()).trim();
+
+  if (current !== dateDisplay) {
+    dateCell.setValue(dateDisplay);
+
+    const width = FB_MULTI.END_HOUR - FB_MULTI.START_HOUR + 1;
+    sh.getRange(
+      FB_MULTI.CHANNELS[0].extendedRow,
+      FB_MULTI.EXTENDED_FIRST_VALUE_COL,
+      FB_MULTI.CHANNELS.length,
+      width
+    ).clearContent();
+  }
+}
+
+function syncFacebookExtendedHeaders_() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(FB_MULTI.MAIN_SHEET);
+  if (!sh) return;
+
+  const values = [];
+  for (let hour = FB_MULTI.START_HOUR; hour <= FB_MULTI.END_HOUR; hour++) {
+    values.push(formatFacebookSlot_(hour));
+  }
+
+  sh.getRange(
+    FB_MULTI.EXTENDED_HEADER_ROW,
+    FB_MULTI.EXTENDED_FIRST_VALUE_COL,
+    1,
+    values.length
+  ).setValues([values]);
+}
+
 function cleanupOldFacebookDispatchFlags_(dateKey) {
   const props = PropertiesService.getScriptProperties();
   const all = props.getProperties();
@@ -225,7 +278,6 @@ function cleanupOldFacebookDispatchFlags_(dateKey) {
       props.deleteProperty(key);
     }
 
-    // Clean legacy DZMM-only flags from alpha.5.
     if (
       key.indexOf('FB_DZMM_DISPATCH_') === 0 &&
       key.indexOf('FB_DZMM_DISPATCH_' + dateKey + '_') !== 0
@@ -254,5 +306,8 @@ function appendFacebookDispatchLog_(now, hour, dateKey, channel, status, notes) 
 }
 
 function formatFacebookSlot_(hour) {
-  return hour === 12 ? '12:00 PM' : hour + ':00 AM';
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  let h = hour % 12;
+  if (h === 0) h = 12;
+  return h + ':00 ' + suffix;
 }
