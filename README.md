@@ -4,9 +4,37 @@ Browser-based Facebook **current concurrent viewer (CCU)** monitoring for six ra
 
 ## Version
 
-**v1.5.0-alpha.1**
+**v1.5.0-alpha.2**
 
-YouTube automation remains separate.
+The Facebook automation now writes directly into the existing **LIVE STREAM — MULTI-CHANNEL CCU AUTOMATION** table.
+
+## Production capture rule
+
+For every hourly slot from **4:00 AM through 10:00 PM, Asia/Manila**:
+
+1. Apps Script waits until **+15** after the hour.
+2. It dispatches one GitHub workflow per station.
+3. Each workflow retries through **+20**.
+4. First valid current-viewer count wins for that station/hour.
+5. No valid count by +20 = leave the cell blank.
+6. No late backfill; the next hourly slot starts fresh.
+
+Examples:
+
+- 4:00 AM slot → 4:15-4:20 AM
+- 4:00 PM slot → 4:15-4:20 PM
+- 10:00 PM slot → 10:15-10:20 PM
+
+## Main Google Sheet layout
+
+The existing LIVE STREAM table covers **4:00 AM-10:00 PM**.
+
+Each hour has two subcolumns:
+
+- YouTube
+- Facebook
+
+Regular YouTube automation remains scheduled for **5:00 AM-12:00 PM**. Facebook is scheduled for **4:00 AM-10:00 PM**.
 
 ## Facebook stations
 
@@ -17,42 +45,11 @@ YouTube automation remains separate.
 - DWXI
 - DZRV / Veritas PH
 
-For Facebook, the rule is **ANY current LIVE** on the configured Page.
-
-## Production capture rule
-
-For every hourly slot from **4:00 AM through 10:00 PM, Asia/Manila**:
-
-1. The Apps Script scheduler waits until **+15 minutes** after the hour.
-2. At +15 it dispatches one GitHub workflow per station.
-3. Each workflow retries until a valid current-viewer count is found or the clock reaches **+20**.
-4. The first successful viewer count wins for that station/hour.
-5. If no valid count is available by +20, that station/hour remains blank.
-6. No late backfill; the next hourly slot starts fresh.
-
-Example:
-
-- 4:00 AM slot → first check around 4:15 AM → retry through 4:20 AM.
-- 4:00 PM slot → first check around 4:15 PM → retry through 4:20 PM.
-- 10:00 PM slot → first check around 10:15 PM → retry through 10:20 PM.
-
-## Google Sheet output
-
-The primary Facebook extended table is on the **LIVE STREAM** sheet and covers **4:00 AM-10:00 PM**.
-
-The existing combined YouTube/Facebook table for **5:00 AM-12:00 PM** is retained as a legacy mirror for Facebook, so the current daily report remains compatible.
-
-## Manual test
-
-Use Apps Script:
-
-`testFacebookAllDispatchNow()`
-
-Manual tests write diagnostics to LOG but do not write production Facebook cells.
+DZBB GMA News remains YouTube-only.
 
 ## Secrets
 
-GitHub Actions secrets:
+GitHub Actions:
 
 - `APPS_SCRIPT_CALLBACK_URL`
 - `APPS_SCRIPT_CALLBACK_SECRET`
