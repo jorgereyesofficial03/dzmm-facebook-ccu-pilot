@@ -40,8 +40,10 @@ const CALLBACK_URL = process.env.APPS_SCRIPT_CALLBACK_URL || '';
 const CALLBACK_SECRET = process.env.APPS_SCRIPT_CALLBACK_SECRET || '';
 
 const runMode = process.env.RUN_MODE || 'scheduled_window';
-const requestedSlotHour = Number(process.env.SLOT_HOUR);
-const retryEndMinute = Number(process.env.RETRY_END_MINUTE || 20);
+const slotKey = String(process.env.SLOT_KEY || '').trim();
+const slotLabel = String(process.env.SLOT_LABEL || '').trim();
+const slotDate = String(process.env.SLOT_DATE || '').trim();
+const windowEndMinuteOfDay = Number(process.env.WINDOW_END_MINUTE_OF_DAY);
 const timeZone = 'Asia/Manila';
 
 function nowPhtParts() {
@@ -61,7 +63,8 @@ function nowPhtParts() {
     date: `${get('year')}-${get('month')}-${get('day')}`,
     hour: Number(get('hour')),
     minute: Number(get('minute')),
-    second: Number(get('second'))
+    second: Number(get('second')),
+    minuteOfDay: (Number(get('hour')) * 60) + Number(get('minute'))
   };
 }
 
@@ -284,18 +287,34 @@ async function callback(payload) {
     throw new Error('Callback configuration missing.');
   }
 
-  const r = await fetch(CALLBACK_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      secret: CALLBACK_SECRET,
-      ...payload
-    })
-  });
+  let lastError = null;
 
-  if (!r.ok) {
-    throw new Error(`Callback failed: HTTP ${r.status} ${await r.text()}`);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const r = await fetch(CALLBACK_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          secret: CALLBACK_SECRET,
+          ...payload
+        })
+      });
+
+      if (r.ok) return;
+
+      lastError = new Error(
+        `Callback failed: HTTP ${r.status} ${await r.text()}`
+      );
+    } catch (err) {
+      lastError = err;
+    }
+
+    if (attempt < 3) {
+      await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+    }
   }
+
+  throw lastError || new Error('Callback failed.');
 }
 
 async function writeResult(result) {
@@ -405,30 +424,14 @@ async function oneAttempt(browser, attemptNo) {
   }
 }
 
-function resolvedSlotHour_(pht) {
-  if (Number.isInteger(requestedSlotHour) &&
-      requestedSlotHour >= 4 &&
-      requestedSlotHour <= 22) {
-    return requestedSlotHour;
-  }
-
-  if (runMode === 'manual_test' &&
-      Number.isInteger(pht.hour) &&
-      pht.hour >= 4 &&
-      pht.hour <= 22) {
-    return pht.hour;
-  }
-
-  return requestedSlotHour;
-}
-
 function basePayload(pht, result, testMode) {
   return {
     stationKey,
     channel: station.channel,
     platform: 'Facebook',
-    date: pht.date,
-    slotHour: resolvedSlotHour_(pht),
+    date: slotDate || pht.date,
+    slotKey,
+    slotLabel,
     testMode,
     pageUrl: PAGE_URL,
     observedAtPht: pht,
@@ -469,7 +472,14 @@ async function main() {
     while (true) {
       const pht = nowPhtParts();
 
-      if (pht.hour !== resolvedSlotHour_(pht) || pht.minute > retryEndMinute) {
+      if (
+        !slotDate ||
+        !slotKey ||
+        !slotLabel ||
+        !Number.isFinite(windowEndMinuteOfDay) ||
+        pht.date !== slotDate ||
+        pht.minuteOfDay > windowEndMinuteOfDay
+      ) {
         const finalPayload = basePayload(pht, {
           ...last,
           ok: false,
@@ -508,7 +518,7 @@ async function main() {
         return;
       }
 
-      if (pht.minute >= retryEndMinute) {
+      if (pht.minuteOfDay >= windowEndMinuteOfDay) {
         const finalPayload = basePayload(pht, {
           ...last,
           ok: false,
