@@ -1,40 +1,39 @@
 # Facebook CCU Multi-Channel Automation
 
-Browser-based Facebook **current concurrent viewer (CCU)** monitoring for six radio/media Pages.
+Browser-based Facebook current concurrent viewer (CCU) monitoring for six radio/media Pages.
 
 ## Version
 
-**v1.5.0-alpha.2**
+**v1.6.0-alpha.1 — program-schedule aware**
 
-The Facebook automation now writes directly into the existing **LIVE STREAM — MULTI-CHANNEL CCU AUTOMATION** table.
+## Scheduling
 
-## Production capture rule
+The automation no longer assumes one checkpoint every hour.
 
-For every hourly slot from **4:00 AM through 10:00 PM, Asia/Manila**:
+It reads the **PROGRAM SCHEDULE** sheet and uses the actual DZMM program **start time** for each day type:
 
-1. Apps Script waits until **+15** after the hour.
-2. It dispatches one GitHub workflow per station.
-3. Each workflow retries through **+20**.
-4. First valid current-viewer count wins for that station/hour.
-5. No valid count by +20 = leave the cell blank.
-6. No late backfill; the next hourly slot starts fresh.
+- Weekday
+- Saturday
+- Sunday
 
-Examples:
+Only program starts from **4:00 AM through 10:00 PM** are recorded.
 
-- 4:00 AM slot → 4:15-4:20 AM
-- 4:00 PM slot → 4:15-4:20 PM
-- 10:00 PM slot → 10:15-10:20 PM
+For every configured program start:
 
-## Main Google Sheet layout
+1. Wait 15 minutes after the program begins.
+2. Dispatch one GitHub workflow per Facebook station.
+3. Retry through +20.
+4. First valid current-viewer count wins.
+5. If no valid CCU is found by +20, leave that station/slot blank.
+6. Duplicate program rows with the same start time use one CCU checkpoint.
 
-The existing LIVE STREAM table covers **4:00 AM-10:00 PM**.
+This supports non-hourly starts such as 7:30 AM, 12:30 PM, 5:45 PM, 7:15 AM, 8:30 PM, etc.
 
-Each hour has two subcolumns:
+## Output
 
-- YouTube
-- Facebook
+Results write directly to the existing **LIVE STREAM – MULTI-CHANNEL CCU AUTOMATION** table.
 
-Regular YouTube automation remains scheduled for **5:00 AM-12:00 PM**. Facebook is scheduled for **4:00 AM-10:00 PM**.
+The callback locates the exact program-start header and writes to its Facebook subcolumn.
 
 ## Facebook stations
 
@@ -50,11 +49,9 @@ DZBB GMA News remains YouTube-only.
 ## Secrets
 
 GitHub Actions:
-
 - `APPS_SCRIPT_CALLBACK_URL`
 - `APPS_SCRIPT_CALLBACK_SECRET`
 
-Apps Script Script Properties:
-
+Apps Script:
 - `FB_CALLBACK_SECRET`
 - `GITHUB_ACTIONS_TOKEN`
