@@ -1,9 +1,7 @@
 /**
- * Facebook multi-channel callback receiver — v1.5.0-alpha.2
- *
- * Writes directly to the existing LIVE STREAM multi-channel table.
- * Production window: 4:00 AM through 10:00 PM PHT.
- * Capture attempt starts at +15 and ends at +20.
+ * Facebook multi-channel callback receiver — v1.6.0-alpha.1
+ * Program-start based schedule from 4:00 AM through 10:00 PM PHT.
+ * Each slot captures from +15 through +20 after the program start.
  *
  * Script Property required:
  * FB_CALLBACK_SECRET
@@ -11,10 +9,8 @@
 
 const FB_CALLBACK = {
   TZ: 'Asia/Manila',
-  START_HOUR: 4,
-  END_HOUR: 22,
   MAIN_SHEET: 'LIVE STREAM',
-  TABLE_START_HOUR: 4
+  HEADER_ROW: 4
 };
 
 const FB_CALLBACK_CHANNELS = {
@@ -31,10 +27,10 @@ function doGet() {
     .createTextOutput(JSON.stringify({
       ok: true,
       service: 'Facebook Multi-Channel CCU Callback',
-      version: 'v1.5.0-alpha.2',
+      version: 'v1.6.0-alpha.1',
+      schedule: 'Program-start based',
       productionHours: '4:00 AM-10:00 PM PHT',
-      captureWindow: '+15 to +20',
-      output: 'LIVE STREAM main multi-channel table',
+      captureWindow: '+15 to +20 after each configured program start',
       method: 'POST required for callbacks'
     }))
     .setMimeType(ContentService.MimeType.JSON);
@@ -54,25 +50,17 @@ function doPost(e) {
 
     const stationKey = String(payload.stationKey || '').toLowerCase();
     const cfg = FB_CALLBACK_CHANNELS[stationKey];
+    if (!cfg) throw new Error('Unknown stationKey: ' + stationKey);
 
-    if (!cfg) {
-      throw new Error('Unknown stationKey: ' + stationKey);
-    }
+    const slotLabel = String(payload.slotLabel || '').trim();
+    const slotKey = String(payload.slotKey || '').trim();
+    if (!slotLabel || !slotKey) throw new Error('Missing slotLabel/slotKey');
 
     const now = new Date();
     const testMode = payload.testMode === true;
     const rawStatus = String(payload.status || 'FB_ERROR');
     const status = (testMode ? 'PILOT TEST ' : '') + rawStatus;
-    const slotHour = Number(payload.slotHour);
     const ccu = payload.ok ? Number(payload.viewerCount) : '';
-
-    if (
-      !Number.isInteger(slotHour) ||
-      slotHour < FB_CALLBACK.START_HOUR ||
-      slotHour > FB_CALLBACK.END_HOUR
-    ) {
-      throw new Error('Invalid slotHour: ' + payload.slotHour);
-    }
 
     if (payload.ok && !Number.isFinite(ccu)) {
       throw new Error('Invalid viewerCount');
@@ -82,20 +70,29 @@ function doPost(e) {
     const sh = ss.getSheetByName(FB_CALLBACK.MAIN_SHEET);
     const log = ss.getSheetByName('LOG');
 
-    // Main table layout:
-    // 4AM = B/C, 5AM = D/E, ... 10PM = AL/AM.
-    // YouTube is the first column of each pair; Facebook is the second.
-    const fbCol = 3 + ((slotHour - FB_CALLBACK.TABLE_START_HOUR) * 2);
+    const headerValues = sh.getRange(
+      FB_CALLBACK.HEADER_ROW,
+      1,
+      1,
+      sh.getLastColumn()
+    ).getDisplayValues()[0];
+
+    const headerIndex = headerValues.findIndex(v => String(v).trim() === slotLabel);
+    if (headerIndex < 0) {
+      throw new Error('Slot header not found in LIVE STREAM: ' + slotLabel);
+    }
+
+    // Header sits on the YouTube column of the pair; Facebook is the next column.
+    const fbCol = headerIndex + 2;
     const target = sh.getRange(cfg.row, fbCol);
 
-    // Manual tests log only. Production: first successful CCU wins.
     if (!testMode && payload.ok && target.getValue() === '') {
       target.setValue(ccu);
     }
 
     log.appendRow([
       Utilities.formatDate(now, FB_CALLBACK.TZ, 'yyyy-MM-dd HH:mm:ss'),
-      formatFacebookCallbackSlot_(slotHour),
+      slotLabel,
       payload.date || Utilities.formatDate(now, FB_CALLBACK.TZ, 'yyyy-MM-dd'),
       cfg.channel,
       'Facebook',
@@ -104,6 +101,7 @@ function doPost(e) {
       payload.ok ? ccu : '',
       status,
       [
+        'Slot: ' + slotKey,
         payload.liveUrl ? 'Live: ' + payload.liveUrl : '',
         payload.extractionMethod ? 'Method: ' + payload.extractionMethod : '',
         payload.lastStatus ? 'Last status: ' + payload.lastStatus : '',
@@ -115,7 +113,9 @@ function doPost(e) {
     return ContentService
       .createTextOutput(JSON.stringify({
         ok: true,
-        stationKey: stationKey,
+        stationKey,
+        slotKey,
+        slotLabel,
         row: cfg.row,
         productionWritten: !testMode && payload.ok
       }))
@@ -130,11 +130,4 @@ function doPost(e) {
       }))
       .setMimeType(ContentService.MimeType.JSON);
   }
-}
-
-function formatFacebookCallbackSlot_(hour) {
-  const suffix = hour >= 12 ? 'PM' : 'AM';
-  let h = hour % 12;
-  if (h === 0) h = 12;
-  return h + ':00 ' + suffix;
 }
